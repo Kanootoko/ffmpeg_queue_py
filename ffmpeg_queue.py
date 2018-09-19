@@ -1,5 +1,5 @@
-'''This is a console program which provides queue feautue for ffmpeg. It can be used with other applications, if needed
-Version: 1.0.0 [2018.08.23]
+'''This is a console program which provides queue feature for ffmpeg. It can be used with other applications, if needed
+Version: 1.1.0 [2018.09.19]
 Usage:
 1. Console arguments.
 	"--help" - print this help message and terminate program
@@ -17,10 +17,13 @@ Usage:
 	"--threads=<int>" - change number of ffmpegs running at one time
 	"--config_file=<path>" or "-cfg=<path>" - load configuration from <path>. By default, script tries to
 	    load config file "default.ini" in directory of launching.
+	"--shutdown" or "-s" - computer will be shut down after the script is finished
+	"--hibernate" or "--hibernation" or "-h" - computer will be hibernated after the script is finished
+	"--no_user" or "-no_user" - no interface will be shown, only commands passed with command line or configuration file
 2. Interface.
 	  After running program, you get to console interface, where you can see list of commands and how your
-	executing string looks like at the moment. You can skip interface step by console command or with parameter in
-	configuration file [both feautues not implemented yet]
+	executing string looks like at the moment. You can skip interface step by console command ("--no_user")
+	or with parameter in configuration file (no_user = true)
 3. Some notes.
 	  Script is developed and tested (a little bit) under Windows 10 platform with python 3.7.0.
 	Linux support will be implemented in future versions. I hope so. Nevertheless, one-threaded mode could work now.
@@ -43,41 +46,55 @@ def change_title(title):
 	if os.sys.platform == 'win32':
 		subprocess.call('title {}'.format(title), shell=True)
 	
-def save(filename, savelist):
-	'Function for saving configuration in file. Takes filename ans tuple of all user-defined parameters'
+def save(filename, savedict):
+	'Function for saving configuration in file. Takes filename and dictionary of parameters'
 	import configparser
 	f = open(filename, 'w')
 	saving = configparser.ConfigParser()
 	saving.add_section('default')
-	tmpFormats = savelist[3]
-	tmpOutDir = savelist[6]
-	savelist[3] = ','.join(savelist[3])
-	if len(savelist[6].split()) == 2 and savelist[6].split()[0].endswith('Output') and savelist[6].split()[1].isalnum():
-		savelist[6] = ''
-	for name, val in zip(('ffmpeg_path', 'input_params', 'output_params', 'input_formats', \
-	                      'output_format', 'input_dir', 'output_dir', 'threads'), savelist):
-		saving['default'].update({name: str(val)})
-	savelist[3] = tmpFormats
-	savelist[6] = tmpOutDir
+
+	if savedict['output_dir'] and len(savedict['output_dir'].split()) == 2 and \
+	   savedict['output_dir'].split()[0].endswith('Output') and savedict['output_dir'].split()[1].isalnum():
+		del savedict['output_dir']
+	for key in savedict.keys():
+		savedict[key] = str(savedict[key])
+	saving['default'].update(savedict)
 	saving.write(f)
 	f.close()
 	
-def load(filename):
-	'Function for loading configuration file. Returns tuple of all user-defined parameters'
+def load(filename, order = ('ffmpeg_path', 'input_params', 'output_params', 'input_formats', \
+                            'output_format', 'input_dir', 'output_dir', 'threads', 'shutdown_type', \
+                            'shutdown_time', 'no_user')):
+	'Function for loading configuration file. Returns tuple of all user-defined parameters in order given in input'
 	import configparser
 	loading = configparser.ConfigParser()
 	loading.read(filename)
 	if not 'default' in loading.sections():
 		return (False, ())
 	loaded = {'ffmpeg_path': 'ffmpeg', 'input_params': '-i', 'output_params': '-c copy', \
-	          'input_formats': 'avi', 'output_format': 'mkv', 'input_dir': '.', 'output_dir': './Output {}'.format(int(time.time())), \
-	          'threads': 1}
+	          'input_formats': 'avi', 'output_format': 'mkv', 'input_dir': '.', 'output_dir': '', \
+	          'threads': 1, 'shutdown_type': '-', 'shutdown_time': 30, 'no_user': 'false'}
 	loaded.update(dict(loading['default']))
+	try:
+		loaded['shutdown_time'] = int(loaded['shutdown_time'])
+	except Exception:
+		loaded['threads'] = 1
+	try:
+		loaded['threads'] = int(loaded['threads'])
+	except Exception:
+		loaded['threads'] = 30
+	loaded['input_formats'] = ' '.join(loaded['input_formats'].split(',')).split()
+	loaded['no_user'] = True if loaded['no_user'].lower() in ('true', 't', '1', True, 'yes', 'on') else False
+	
 	if loaded['output_dir'] == '':
 		loaded['output_dir'] = './Output {}'.format(int(time.time()))
-	return (True, (loaded['ffmpeg_path'], loaded['input_params'], loaded['output_params'], \
-	                      ' '.join(loaded['input_formats'].split(',')).replace('[', '').replace(']', '').replace('\'', '').replace('"', '').split(), \
-	                      loaded['output_format'], loaded['input_dir'], loaded['output_dir'], int(loaded['threads'])))
+	ans = []
+	for name in order:
+		if name in loaded:
+			ans.append(loaded[name])
+		else:
+			ans.append('')
+	return (True, ans)
 
 def split_quotes(string):
 	string = string.split()
@@ -113,6 +130,76 @@ def process(number, parent_pipe, action_pipe):
 		print('{}: Thread {} takes [[{}]]'.format(time.ctime(), number, job))
 		subprocess.getoutput(job)
 
+class shutdown:
+	'''This class is for easy choice between shutdown, hibernation and nothing'''
+	def __init__(self, type_ = '-', time = 30):
+		if type_ in ('hibernate', 'hibernation', '/h', 'h'):
+			self.__type = 'h'
+		elif (type_ in ('shudown', '/s', 's')):
+			self.__type = 's'
+		else:
+			self.__type = '-'
+		try:
+			self.__time = int(time)
+		except ValueError:
+			self.__time = 30
+
+	def __str__(self):
+		if self.__type == 's':
+			return 'Shutdown in {} seconds'.format(self.__time)
+		elif self.__type == 'h':
+			return 'Hibernation in {} seconds'.format(self.__time)
+		else:
+			return 'No shutdown'
+
+	@property
+	def type(self):
+		return self.__type
+
+	@type.setter
+	def type(self, new_type):
+		if new_type in ('h', 'hibernate', 'hibernation', '/h'):
+			self.__type = 'h'
+		elif (new_type in ('s', 'shutdown', '/s')):
+			self.__type = 's'
+		else:
+			self.__type = '-'
+
+	@property
+	def time(self):
+		return self.__time
+
+	@time.setter
+	def time(self, new_time):
+		try:
+			self.__time = new_time
+		except ValueError:
+			return False
+
+	def execute(self):
+		'''Shutdown will be launched as "shutdown /s /t <time>" and can be cancelled as "shutdown /a".
+		But hibernation cannot be run like this, to stop the process, the file ".stayon" must be created in directory of script.
+		Or Crl+C can be hit as well.'''
+		if self.__type == '-' or os.path.isfile('.stayon'):
+			return
+		change_title(str(self))
+		if self.__type == 'h':
+			subprocess.call(('msg', os.getlogin(), 'Computer will be hibernated in {} seconds'.format(self.__time)))
+			print('Hibernating in {} seconds after {}'.format(self.__time, time.ctime()))
+			print('----- If you wish to stop the process, hit Ctrl + C on keyboard -----')
+			try:
+				time.sleep(self.time)
+			except KeyboardInterrupt:
+				print('Hibernation cancelled')
+				return
+			if os.path.isfile('.stayon'):
+				return
+			subprocess.call(('shutdown', '/h'))
+		else:
+			if os.path.isfile('.stayon'):
+				return
+			subprocess.call(('shutdown', '/s', '/t', str(self.__time)))
+
 def main(argv):
 
 	ffmpeg_path = 'ffmpeg'
@@ -123,11 +210,14 @@ def main(argv):
 	input_dir = '.'
 	output_dir = os.path.normpath('./Output {}'.format(int(time.time())))
 	threads = 1
+	finish = shutdown()
+	no_user = False
 	
 	try:
 		trying = load('default.ini')
 		if trying[0]:
-			(ffmpeg_path, input_params, output_params, input_formats, output_format, input_dir, output_dir, threads) = trying[1]
+			(ffmpeg_path, input_params, output_params, input_formats, output_format, \
+			input_dir, output_dir, threads, finish.type, finish.time, no_user) = trying[1]
 	except Exception:
 		pass
 
@@ -150,7 +240,7 @@ def main(argv):
 			input_params = el.split('=')[1]
 		elif el.startswith(('--output_parameters=', '-op=')):
 			output_params = el.split('=')[1]
-		elif el.startswith('threads='):
+		elif el.startswith(('--threads=', '-threads=')):
 			try:
 				threads = int(el.split('=')[1])
 			except ValueError:
@@ -164,9 +254,21 @@ def main(argv):
 				print('Error occured while loading: {}'.format(exc))
 				trying = (False, ())
 			if trying != '' and trying[0]:
-			    (ffmpeg_path, input_params, output_params, input_formats, output_format, input_dir, output_dir, threads) = trying[1]
+			    (ffmpeg_path, input_params, output_params, input_formats, \
+			     output_format, input_dir, output_dir, threads, finish.type, \
+			     finish.time, no_user) = trying[1]
+		elif el in ('--shutdown', '-s'):
+			finish.change_type('s')
+		elif el in ('--hybernation', '--hibernate', '-h'):
+			finish.change_type('h')
+		elif el.startswith(('--shutdown_time=', '-time=')):
+			finish.change_time(el.split('=')[1])
+		elif el in ('--no_user', '-no_user'):
+			no_user = True
+		else:
+			print('Unknown console parameter: {}'.format(el))
 
-	while True:
+	while not no_user:
 		print('-' * (os.get_terminal_size().columns // 2))
 		print('Now execution string looks like this:')
 		print('{} {} {} {} {}'.format(ffmpeg_path, input_params, \
@@ -178,6 +280,7 @@ def main(argv):
 			cnt += fname.endswith(tuple(input_formats))
 		print('{} files found'.format(cnt))
 
+		print(finish)
 		print('List of commands:')
 		print('\t"ffpath" / "ffmpeg_path" - change path to ffmpeg executable file', '[{}]'.format(ffmpeg_path))
 		print('\t"if" / "input_formats" / "input_format" / "fin"- change input format(s)', input_formats)
@@ -189,6 +292,8 @@ def main(argv):
 		print('\t"threads" - change number of ffmpegs running at one time', '[{}]'.format(threads))
 		print('\t"save <filename>" - save current configuration to <filename> file"')
 		print('\t"load <filename>" - load configuration from <filename> file"')
+		print('\t"s_ty" / "shutdown_type" - chage type of action after finishing ("-" or "shutdown" / "s" or "hibernation" / "h")')
+		print('\t"s_ti" / "shutdown_time" - change time between finishing and shutdown/hibernation')
 		print('\t"exit" / "stop" / "quit" - exit the script')
 		print('\t"start" / "go" / <empty_string> - start the script')
 
@@ -303,7 +408,10 @@ def main(argv):
 			if data == '':
 				data = input('Enter path to save current configuration: ')
 			try:
-				save(data, [ffmpeg_path, input_params, output_params, input_formats, output_format, input_dir, output_dir, threads])
+				save(data, {'ffmpeg_path': ffmpeg_path, 'input_params': input_params, 'output_params': output_params, \
+				      'input_formats': ','.join(input_formats), 'output_format': output_format, 'input_dir': input_dir, \
+				      'output_dir': output_dir, 'threads': threads, 'shutdown_type': finish.type, \
+				      'shutdown_time': finish.time, 'no_user': no_user})
 			except Exception as exc:
 				print('Error occured while saving: {}'.format(exc))
 			else:
@@ -318,22 +426,39 @@ def main(argv):
 				print('Error occured while loading: {}'.format(exc))
 				trying = (False, ())
 			if trying != '' and trying[0]:
-			    (ffmpeg_path, input_params, output_params, input_formats, output_format, input_dir, output_dir, threads) = trying[1]
+			    (ffmpeg_path, input_params, output_params, input_formats, output_format, \
+			    input_dir, output_dir, threads, finish.type, finish.time, no_user) = trying[1]
 			    print('Loaded successfully')
 			else:
 				print('Error while loading. Are you sure that configuration file is correct?')
+		elif comm.startswith(('s_ty', 'shutdown_type')):
+			if data == '':
+				finish.type = input('Enter "shutdown" / "s" to shut PC down, "hibernate" / "h" to hibernate it, "-" to keep it on')
+			else:
+				finish.type = data
+		elif comm.startswith(('s_ti', 'shutdown_time')):
+			if data == '':
+				finish.time = input('Enter time before shutdown: ')
+			else:
+				finish.time = data
+		elif comm == 'help':
+			print(__doc__)
+			pause()
 		elif comm in ('exit', 'stop', 'quit'):
 			print('Exiting now')
 			return 0
 		elif comm in ('', 'start', 'go'):
 			print('Start working.')
-			save('lastconfig.ini', [ffmpeg_path, input_params, output_params, input_formats, output_format, input_dir, output_dir, threads])
-			print('Current config has been written to "lastconfig.ini"')
 			break
 		else:
 			print('Error. unknown command: "{}"'.format(comm))
 		print('\n')
 
+	save('lastconfig.ini', {'ffmpeg_path': ffmpeg_path, 'input_params': input_params, 'output_params': output_params, \
+		 'input_formats': ','.join(input_formats), 'output_format': output_format, 'input_dir': input_dir, \
+		 'output_dir': output_dir, 'threads': threads, 'shutdown_type': finish.type, \
+		 'shutdown_time': finish.time})
+	print('Current config has been written to "lastconfig.ini"')
 	# working
 	jobs = []
 	for fname in os.listdir(input_dir):
@@ -360,29 +485,42 @@ def main(argv):
 			pipes[cnt] = multiprocessing.Pipe()
 			processes[cnt] = multiprocessing.Process(target = process, args = (cnt, pipes[cnt][0], action_pipe[0]))
 			processes[cnt].start()
-		for job in jobs:
+		jobN = 0
+		while True:
 			what_to_do = action_pipe[1].recv()
-			choose = None
+			if jobN == len(jobs):
+				break
 			for num in range(threads):
 				if pipes[num][1].poll():
-					choose = num
-					break
-			pipes[choose][1].recv()
-			pipes[choose][1].send('start "{}" /WAIT '.format(job) + ffmpeg_path + ' ' + input_params + \
-			                      os.path.normpath(' "' + input_dir + '/' + job + '" ') + output_params + \
-			                      os.path.normpath(' "' + output_dir + '/' + job[:job.rfind('.') + 1] + output_format + '"')
-			                     )
-		for num in range(min(threads, len(jobs))):
+					job = jobs[jobN]
+					pipes[num][1].recv()
+					if os.sys.platform == 'win32':
+						pipes[num][1].send('start "{}" /WAIT '.format(job) + ffmpeg_path + ' ' + input_params + \
+						                   os.path.normpath(' "' + input_dir + '/' + job + '" ') + output_params + \
+						                   os.path.normpath(' "' + output_dir + '/' + job[:job.rfind('.') + 1] + output_format + '"')
+						                  )
+					else:
+						pipes[num][1].send(ffmpeg_path + ' ' + input_params + os.path.normpath(' "' + input_dir + '/' + job + '" ') +\
+						                   output_params + os.path.normpath(' "' + output_dir + '/' + job[:job.rfind('.') + 1] + output_format + '"') + \
+						                   ' &')
+					jobN += 1
+					if jobN == len(jobs):
+						break
+		closed_threads = 0
+		while closed_threads < threads:
 			what_to_do = action_pipe[1].recv()
 			for num in range(threads):
 				if pipes[num][1].poll():
 					pipes[num][1].recv()
 					pipes[num][1].send(None)
 					processes[num].join()
+					closed_threads += 1
 	if os.path.isdir(output_dir) and len(os.listdir(output_dir)) == 0:
 		print('Output folder is empty, it will be deleted')
 		os.rmdir(output_dir)
-	pause()
+	finish.execute()
+	if not no_user:
+		pause()
 
 if __name__ == '__main__':
 	main(sys.argv)
