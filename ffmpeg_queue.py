@@ -46,55 +46,40 @@ def change_title(title):
 	if os.sys.platform == 'win32':
 		subprocess.call('title {}'.format(title), shell=True)
 	
-def save(filename, savedict):
-	'Function for saving configuration in file. Takes filename and dictionary of parameters'
+def save_properties(props, filename):
+	'Function for saving configuration in file. Takes properties class and filename'
 	import configparser
 	f = open(filename, 'w')
 	saving = configparser.ConfigParser()
 	saving.add_section('default')
 
+	savedict = dict()
+	for key in set(filter(lambda x: not x.startswith('_'), dir(props))):
+		savedict[key] = str(getattr(props, key))
 	if savedict['output_dir'] and len(savedict['output_dir'].split()) == 2 and \
 	   savedict['output_dir'].split()[0].endswith('Output') and savedict['output_dir'].split()[1].isalnum():
 		del savedict['output_dir']
-	for key in savedict.keys():
-		savedict[key] = str(savedict[key])
 	saving['default'].update(savedict)
 	saving.write(f)
 	f.close()
 	
-def load(filename, order = ('ffmpeg_path', 'input_params', 'output_params', 'input_formats', \
-                            'output_format', 'input_dir', 'output_dir', 'threads', 'shutdown_type', \
-                            'shutdown_time', 'no_user')):
-	'Function for loading configuration file. Returns tuple of all user-defined parameters in order given in input'
+def load_properties(props, filename):
+	'Function for loading configuration file. Edits properties class given in parameters'
 	import configparser
 	loading = configparser.ConfigParser()
 	loading.read(filename)
+	default_props = properties()
 	if not 'default' in loading.sections():
-		return (False, ())
-	loaded = {'ffmpeg_path': 'ffmpeg', 'input_params': '-i', 'output_params': '-c copy', \
-	          'input_formats': 'avi', 'output_format': 'mkv', 'input_dir': '.', 'output_dir': '', \
-	          'threads': 1, 'shutdown_type': '-', 'shutdown_time': 30, 'no_user': 'false'}
-	loaded.update(dict(loading['default']))
-	try:
-		loaded['shutdown_time'] = int(loaded['shutdown_time'])
-	except Exception:
-		loaded['threads'] = 1
-	try:
-		loaded['threads'] = int(loaded['threads'])
-	except Exception:
-		loaded['threads'] = 30
-	loaded['input_formats'] = ' '.join(loaded['input_formats'].split(',')).split()
-	loaded['no_user'] = True if loaded['no_user'].lower() in ('true', 't', '1', True, 'yes', 'on') else False
-	
-	if loaded['output_dir'] == '':
-		loaded['output_dir'] = './Output {}'.format(int(time.time()))
-	ans = []
-	for name in order:
-		if name in loaded:
-			ans.append(loaded[name])
+		raise ValueError('no \'default\' section is found; load is aborted')
+	loading = loading['default']
+	params = set(filter(lambda x: not x.startswith('_'), dir(props)))
+	for param in params:
+		if param in loading:
+			#print('setting {} to {}'.format(param, loading[param]))
+			setattr(props, param, loading[param])
 		else:
-			ans.append('')
-	return (True, ans)
+			#print('setting {} to {} from default'.format(param, getattr(default_props, param)))
+			setattr(props, param, getattr(default_props, param))
 
 def split_quotes(string):
 	string = string.split()
@@ -133,46 +118,56 @@ def process(number, parent_pipe, action_pipe):
 class shutdown:
 	'''This class is for easy choice between shutdown, hibernation and nothing'''
 	def __init__(self, type_ = '-', time = 30):
-		if type_ in ('hibernate', 'hibernation', '/h', 'h'):
-			self.__type = 'h'
-		elif (type_ in ('shudown', '/s', 's')):
-			self.__type = 's'
+		from re import match, findall
+		if isinstance(type_, list):
+			type_ = ' '.join(type_)
+		m = match('^([Hh](ibernation)?|[Ss](hutdown)?)[^\d]*(\d+)( seconds)?$', type_)
+		if m is not None:
+		    m = findall('(\w)\w*[^\d]*(\d+)', type_)[0]
+		    type_ = m[0]
+		    time = m[1]
+		if type_ in ('hibernate', 'hibernation', '/h', 'h', 'H'):
+			self._type = 'h'
+		elif (type_ in ('shutdown', '/s', 's', 'S')):
+			self._type = 's'
 		else:
-			self.__type = '-'
+			self._type = '-'
 		try:
-			self.__time = int(time)
+			self._time = int(time)
 		except ValueError:
-			self.__time = 30
+			self._time = 30
 
 	def __str__(self):
-		if self.__type == 's':
-			return 'Shutdown in {} seconds'.format(self.__time)
-		elif self.__type == 'h':
-			return 'Hibernation in {} seconds'.format(self.__time)
+		if self._type == 's':
+			return 'Shutdown in {} seconds'.format(self._time)
+		elif self._type == 'h':
+			return 'Hibernation in {} seconds'.format(self._time)
 		else:
-			return 'No shutdown'
+			return 'No shutdown is planned'
+	def __repr__(self):
+		return (self._type + ' ' + self.time) if self._type != '-' else self._type
 
 	@property
 	def type(self):
-		return self.__type
+		return self._type
 
 	@type.setter
 	def type(self, new_type):
 		if new_type in ('h', 'hibernate', 'hibernation', '/h'):
-			self.__type = 'h'
+			self._type = 'h'
 		elif (new_type in ('s', 'shutdown', '/s')):
-			self.__type = 's'
+			self._type = 's'
 		else:
-			self.__type = '-'
+			self._type = '-'
 
 	@property
 	def time(self):
-		return self.__time
+		return self._time
 
 	@time.setter
 	def time(self, new_time):
 		try:
-			self.__time = new_time
+			self._time = new_time
 		except ValueError:
 			return False
 
@@ -180,12 +175,12 @@ class shutdown:
 		'''Shutdown will be launched as "shutdown /s /t <time>" and can be cancelled as "shutdown /a".
 		But hibernation cannot be run like this, to stop the process, the file ".stayon" must be created in directory of script.
 		Or Crl+C can be hit as well.'''
-		if self.__type == '-' or os.path.isfile('.stayon'):
+		if self._type == '-' or os.path.isfile('.stayon'):
 			return
 		change_title(str(self))
-		if self.__type == 'h':
-			subprocess.call(('msg', os.getlogin(), 'Computer will be hibernated in {} seconds'.format(self.__time)))
-			print('Hibernating in {} seconds after {}'.format(self.__time, time.ctime()))
+		if self._type == 'h':
+			subprocess.call(('msg', os.getlogin(), 'Computer will be hibernated in {} seconds'.format(self._time)))
+			print('Hibernating in {} seconds after {}'.format(self._time, time.ctime()))
 			print('----- If you wish to stop the process, hit Ctrl + C on keyboard -----')
 			try:
 				time.sleep(self.time)
@@ -198,27 +193,70 @@ class shutdown:
 		else:
 			if os.path.isfile('.stayon'):
 				return
-			subprocess.call(('shutdown', '/s', '/t', str(self.__time)))
+			subprocess.call(('shutdown', '/s', '/t', str(self._time)))
+
+class properties:
+	def __init__(self):
+		self.ffmpeg_path = 'ffmpeg'
+		self.input_params = '-i'
+		self.output_params = '-c copy'
+		self._input_formats = ['avi']
+		self.output_format = 'mkv'
+		self.input_dir = '.'
+		self._output_dir = os.path.normpath('./Output {}'.format(int(time.time())))
+		self._threads = 1
+		self._finish = shutdown()
+		self._no_user = False
+	@property
+	def input_formats(self):
+		return self._input_formats
+	@input_formats.setter
+	def input_formats(self, new_input_formats):
+		if isinstance(new_input_formats, str):
+			self._input_formats = ' '.join(new_input_formats.split(',')).split()
+		else:
+			self._input_formats = new_input_formats
+	@property
+	def threads(self):
+		return self._threads
+	@threads.setter
+	def threads(self, new_threads):
+		try:
+			self._threads = int(new_threads)
+		except:
+			pass
+	@property
+	def no_user(self):
+		return self._no_user
+	@no_user.setter
+	def no_user(self, new_no_user):
+		if isinstance(new_no_user, str):
+			self._no_user = True if new_no_user.lower() in ('true', 't', '1', True, 'yes', 'on') else False
+		else:
+			self._no_user = bool(new_no_user)
+	@property
+	def output_dir(self):
+		return self._output_dir
+	@output_dir.setter
+	def output_dir(self, new_output_dir):
+		self._output_dir = './Output {}'.format(int(time.time())) if new_output_dir == '' else new_output_dir
+
+	@property
+	def finish(self):
+		return self._finish
+	@finish.setter
+	def finish(self, new_finish):
+		if isinstance(new_finish, str):
+			self._finish = shutdown(new_finish.split())
+		else:
+			self._finish = new_finish
 
 def main(argv):
 
-	ffmpeg_path = 'ffmpeg'
-	input_params = '-i'
-	output_params = '-c copy'
-	input_formats = ['avi']
-	output_format = 'mkv'
-	input_dir = '.'
-	output_dir = os.path.normpath('./Output {}'.format(int(time.time())))
-	threads = 1
-	finish = shutdown()
-	no_user = False
-	
+	props = properties()
 	try:
-		trying = load('default.ini')
-		if trying[0]:
-			(ffmpeg_path, input_params, output_params, input_formats, output_format, \
-			input_dir, output_dir, threads, finish.type, finish.time, no_user) = trying[1]
-	except Exception:
+		load_properties(props, 'default.ini')
+	except:
 		pass
 
 	# parsing arguments
@@ -227,69 +265,69 @@ def main(argv):
 			print(__doc__)
 			return 0
 		elif el.startswith(('--ffmpeg_path=', '-ffpath=')):
-			ffmpeg_path = el.split('=')[1]
+			props.ffmpeg_path = el.split('=')[1]
 		elif el.startswith(('--input_formats=', '-if=')):
-			input_formats = ' '.join(el.split('=')[1].split(',')).split()
+			props.input_formats = ' '.join(el.split('=')[1].split(',')).split()
 		elif el.startswith(('--output_format=', '-of=')):
-			output_format = el.split('=')[1]
+			props.output_format = el.split('=')[1]
 		elif el.startswith(('--input_dir=', '-id=')):
-			input_dir = el.split('=')[1]
+			props.input_dir = el.split('=')[1]
 		elif el.startswith(('--output_dir=', '-od=')):
-			output_dir = el.split('=')[1]
+			props.output_dir = el.split('=')[1]
 		elif el.startswith(('--input_parameters=', '-ip=')):
-			input_params = el.split('=')[1]
+			props.input_params = el.split('=')[1]
 		elif el.startswith(('--output_parameters=', '-op=')):
-			output_params = el.split('=')[1]
+			props.output_params = el.split('=')[1]
 		elif el.startswith(('--threads=', '-threads=')):
 			try:
-				threads = int(el.split('=')[1])
+				props.threads = int(el.split('=')[1])
 			except ValueError:
-				threads = 1
+				props.threads = 1
 				print('Error with threads parameter: \'{}\''.format(el))
 		elif el.startswith(('--config_file=', '-cfg=')):
 			trying = ''
 			try:
-				trying = load(el.split('=')[1])
+				load(props, el.split('=')[1])
 			except Exception as exc:
-				print('Error occured while loading: {}'.format(exc))
+				print('Error occured while loading: \'{}\''.format(exc))
 				trying = (False, ())
 			if trying != '' and trying[0]:
-			    (ffmpeg_path, input_params, output_params, input_formats, \
-			     output_format, input_dir, output_dir, threads, finish.type, \
-			     finish.time, no_user) = trying[1]
+			    (props.ffmpeg_path, props.input_params, props.output_params, props.input_formats, \
+			     props.output_format, props.input_dir, props.output_dir, props.threads, props.finish.type, \
+			     props.finish.time, props.no_user) = trying[1]
 		elif el in ('--shutdown', '-s'):
-			finish.change_type('s')
+			props.finish.change_type('s')
 		elif el in ('--hybernation', '--hibernate', '-h'):
-			finish.change_type('h')
+			props.finish.change_type('h')
 		elif el.startswith(('--shutdown_time=', '-time=')):
-			finish.change_time(el.split('=')[1])
+			props.finish.change_time(el.split('=')[1])
 		elif el in ('--no_user', '-no_user'):
-			no_user = True
+			props.no_user = True
 		else:
 			print('Unknown console parameter: {}'.format(el))
 
-	while not no_user:
+	while not props.no_user:
 		print('-' * (os.get_terminal_size().columns // 2))
 		print('Now execution string looks like this:')
-		print('{} {} {} {} {}'.format(ffmpeg_path, input_params, \
-		      os.path.normpath('"' + input_dir + '/<filename>.' + (str(input_formats) if len(input_formats) > 1 else input_formats[0]) + '"'), \
-		      output_params, os.path.normpath('"' + output_dir + '/<filename>.' + output_format + '"') \
+		print('{} {} {} {} {}'.format(props.ffmpeg_path, props.input_params, \
+		      os.path.normpath('"' + props.input_dir + '/<filename>.' + (str(props.input_formats) if len(props.input_formats) > 1 else props.input_formats[0]) + '"'), \
+		      props.output_params, os.path.normpath('"' + props.output_dir + '/<filename>.' + props.output_format + '"') \
 		                             ))
 		cnt = 0
-		for fname in os.listdir(input_dir):
-			cnt += fname.endswith(tuple(input_formats))
+		for fname in os.listdir(props.input_dir):
+			cnt += fname.endswith(tuple(props.input_formats))
 		print('{} files found'.format(cnt))
 
-		print(finish)
+		print(props.finish)
 		print('List of commands:')
-		print('\t"ffpath" / "ffmpeg_path" - change path to ffmpeg executable file', '[{}]'.format(ffmpeg_path))
-		print('\t"if" / "input_formats" / "input_format" / "fin"- change input format(s)', input_formats)
-		print('\t"of" / "output_format" / "fout" - change output format', '[{}]'.format(output_format))
-		print('\t"id" / "input_dir" / "din" - change input directory', '[{}]'.format(input_dir))
-		print('\t"od" / "output_dir" / "dout" - change output directory', '[{}]'.format(output_dir))
-		print('\t"ip" / "input_params" / "input_parameters" - change input parameters string', '[{}]'.format(input_params))
-		print('\t"op" / "output_params" / "output_parameters" - change output parameters string', '[{}]'.format(output_params))
-		print('\t"threads" - change number of ffmpegs running at one time', '[{}]'.format(threads))
+		print('\t"ffpath" / "ffmpeg_path" - change path to ffmpeg executable file', '[{}]'.format(props.ffmpeg_path))
+		print('\t"if" / "input_formats" / "input_format" / "fin"- change input format(s)', props.input_formats)
+		print('\t"of" / "output_format" / "fout" - change output format', '[{}]'.format(props.output_format))
+		print('\t"id" / "input_dir" / "din" - change input directory', '[{}]'.format(props.input_dir))
+		print('\t"od" / "output_dir" / "dout" - change output directory', '[{}]'.format(props.output_dir))
+		print('\t"ip" / "input_params" / "input_parameters" - change input parameters string', '[{}]'.format(props.input_params))
+		print('\t"op" / "output_params" / "output_parameters" - change output parameters string', '[{}]'.format(props.output_params))
+		print('\t"threads" - change number of ffmpegs running at one time', '[{}]'.format(props.threads))
 		print('\t"save <filename>" - save current configuration to <filename> file"')
 		print('\t"load <filename>" - load configuration from <filename> file"')
 		print('\t"s_ty" / "shutdown_type" - chage type of action after finishing ("-" or "shutdown" / "s" or "hibernation" / "h")')
@@ -309,8 +347,8 @@ def main(argv):
 				if data == '':
 					data = input('Enter path to ffmpeg executable (or "halt" to cancel): ')
 				if os.path.isfile(data) or True:
-					ffmpeg_path = os.path.normpath(data)
-					print('Accepted, ffmpeg_path changed to \'{}\''.format(ffmpeg_path))
+					props.ffmpeg_path = os.path.normpath(data)
+					print('Accepted, ffmpeg_path changed to \'{}\''.format(props.ffmpeg_path))
 					break
 				elif (data == 'halt'):
 					print('Cancelled')
@@ -323,8 +361,8 @@ def main(argv):
 				if data == '':
 					data = input('Enter format(s) for input (or "halt" to cancel): ')
 				if len(data) > 0:
-					input_formats = ' '.join(data.split(',')).split()
-					print('Accepted, input_formats list changed to {}'.format(input_formats))
+					props.input_formats = data
+					print('Accepted, input_formats list changed to {}'.format(props.input_formats))
 					break
 				elif (data == 'halt'):
 					print('Cancelled')
@@ -337,8 +375,8 @@ def main(argv):
 				if data == '':
 					data = input('Enter format for output (or "halt" to cancel): ')
 				if len(data) > 0 and len(' '.join(data.split(',')).split()) == 1:
-					output_format = ' '.join(data.split(',')).split()[0]
-					print('Accepted, output_formats list changed to \'{}\''.format(output_format))
+					props.output_format = ' '.join(data.split(',')).split()[0]
+					print('Accepted, output_formats list changed to \'{}\''.format(props.output_format))
 					break
 				elif (data == 'halt'):
 					print('Cancelled')
@@ -351,8 +389,8 @@ def main(argv):
 				if data == '':
 					data = input('Enter path to input dirctory (or "halt" to cancel): ')
 				if os.path.isdir(data):
-					input_dir = os.path.normpath(os.path.abspath(data))
-					print('Accepted, input_dir path changed to \'{}\''.format(input_dir))
+					props.input_dir = os.path.normpath(os.path.abspath(data))
+					print('Accepted, input_dir path changed to \'{}\''.format(props.input_dir))
 					break
 				elif (data == 'halt'):
 					print('Cancelled')
@@ -365,8 +403,8 @@ def main(argv):
 				if data == '':
 					data = input('Enter path to input dirctory (or "halt" to cancel): ')
 				if os.access('\\'.join(os.path.split(os.path.abspath(data))[:-1]), os.W_OK):
-					output_dir = os.path.normpath(os.path.abspath(data))
-					print('Accepted, output_dir path changed to \'{}\''.format(output_dir))
+					props.output_dir = os.path.normpath(os.path.abspath(data))
+					print('Accepted, output_dir path changed to \'{}\''.format(props.output_dir))
 					break
 				elif (data == 'halt'):
 					print('Cancelled')
@@ -376,16 +414,16 @@ def main(argv):
 					data = ''
 		elif comm.startswith(('ip', 'input_params', 'input_parameters')):
 			if data == '':
-				input_params = input('Enter a string for input parameters')
+				props.input_params = input('Enter a string for input parameters')
 			else:
-				input_params = data
-			print('Accepted, new input parameters string is \'{}\''.format(input_params))
+				props.input_params = data
+			print('Accepted, new input parameters string is \'{}\''.format(props.input_params))
 		elif comm.startswith(('op', 'output_params', 'output_parameters')):
 			if data == '':
-				output_params = input('Enter a string for output parameters')
+				props.output_params = input('Enter a string for output parameters')
 			else:
-				output_params = data
-			print('Accepted, new output parameters string is \'{}\''.format(output_params))
+				props.output_params = data
+			print('Accepted, new output parameters string is \'{}\''.format(props.output_params))
 		elif comm.startswith('threads'):
 			while True:
 				if data == '':
@@ -394,12 +432,11 @@ def main(argv):
 					break
 				try:
 					assert(int(data) > 0)
-					threads = int(data)
-					if threads > os.cpu_count():
+					props.threads = int(data)
+					if props.threads > os.cpu_count():
 						print('Warning: number of threads that you\'ve entered is larger than ' \
-						      'your computer\'s number of cpus: {}, but {} threads'.format(os.cpu_count(), threads))
-					else:
-						print('Accepted')
+						      'your computer\'s number of cpus: {}, but {} props.threads'.format(os.cpu_count(), props.threads))
+					print('Accepted')
 					break
 				except:
 					print('Error of decoding your "number": \'{}\'. Try again'.format(data))
@@ -408,39 +445,30 @@ def main(argv):
 			if data == '':
 				data = input('Enter path to save current configuration: ')
 			try:
-				save(data, {'ffmpeg_path': ffmpeg_path, 'input_params': input_params, 'output_params': output_params, \
-				      'input_formats': ','.join(input_formats), 'output_format': output_format, 'input_dir': input_dir, \
-				      'output_dir': output_dir, 'threads': threads, 'shutdown_type': finish.type, \
-				      'shutdown_time': finish.time, 'no_user': no_user})
+				save_properties(props, data)
 			except Exception as exc:
-				print('Error occured while saving: {}'.format(exc))
+				print('Error occured while saving: \'{}\''.format(exc))
 			else:
 				print('Save is completed successfully')
 		elif comm.startswith('load'):
 			if data == '':
 				data = input('Enter path to configuration file to load: ')
-			trying = ''
 			try:
-				trying = load(data)
+				load_properties(props, data)
 			except Exception as exc:
-				print('Error occured while loading: {}'.format(exc))
-				trying = (False, ())
-			if trying != '' and trying[0]:
-			    (ffmpeg_path, input_params, output_params, input_formats, output_format, \
-			    input_dir, output_dir, threads, finish.type, finish.time, no_user) = trying[1]
-			    print('Loaded successfully')
+				print('Error occured while loading: \'{}\''.format(exc))
 			else:
-				print('Error while loading. Are you sure that configuration file is correct?')
+			    print('Loaded successfully')
 		elif comm.startswith(('s_ty', 'shutdown_type')):
 			if data == '':
-				finish.type = input('Enter "shutdown" / "s" to shut PC down, "hibernate" / "h" to hibernate it, "-" to keep it on')
+				props.finish.type = input('Enter "shutdown" / "s" to shut PC down, "hibernate" / "h" to hibernate it, "-" to keep it on')
 			else:
-				finish.type = data
+				props.finish.type = data
 		elif comm.startswith(('s_ti', 'shutdown_time')):
 			if data == '':
-				finish.time = input('Enter time before shutdown: ')
+				props.finish.time = input('Enter time before shutdown: ')
 			else:
-				finish.time = data
+				props.finish.time = data
 		elif comm == 'help':
 			print(__doc__)
 			pause()
@@ -454,33 +482,30 @@ def main(argv):
 			print('Error. unknown command: "{}"'.format(comm))
 		print('\n')
 
-	save('lastconfig.ini', {'ffmpeg_path': ffmpeg_path, 'input_params': input_params, 'output_params': output_params, \
-		 'input_formats': ','.join(input_formats), 'output_format': output_format, 'input_dir': input_dir, \
-		 'output_dir': output_dir, 'threads': threads, 'shutdown_type': finish.type, \
-		 'shutdown_time': finish.time})
+	save_properties(props, 'lastconfig.ini')
 	print('Current config has been written to "lastconfig.ini"')
 	# working
 	jobs = []
-	for fname in os.listdir(input_dir):
-		if fname.endswith(tuple(input_formats)):
+	for fname in os.listdir(props.input_dir):
+		if fname.endswith(tuple(props.input_formats)):
 			jobs.append(fname)
-	if len(jobs) > 0 and not os.path.exists(output_dir):
-		os.mkdir(output_dir)
+	if len(jobs) > 0 and not os.path.exists(props.output_dir):
+		os.mkdir(props.output_dir)
 	jobs = tuple(jobs)
-	if threads == 1:
-		for fname in jobs:
-			command = (ffmpeg_path, input_params, os.path.normpath(input_dir + '/' + fname), \
-			           *split_quotes(output_params), os.path.normpath(output_dir + '/' + fname[:fname.rfind('.') + 1] + output_format))
-			print(ffmpeg_path, input_params, os.path.normpath('"' + input_dir + '/' + fname + '"'), \
-			      *split_quotes(output_params), os.path.normpath('"' + output_dir + '/' + fname[:fname.rfind('.') + 1] + output_format + '"'))
-			change_title(fname)
+	if props.threads == 1:
+		for i, fname in enumerate(jobs):
+			command = (props.ffmpeg_path, *split_quotes(props.input_params), os.path.normpath(props.input_dir + '/' + fname), \
+			           *split_quotes(props.output_params), os.path.normpath(props.output_dir + '/' + fname[:fname.rfind('.') + 1] + props.output_format))
+			print(props.ffmpeg_path, props.input_params, os.path.normpath('"' + props.input_dir + '/' + fname + '"'), \
+			      *split_quotes(props.output_params), os.path.normpath('"' + props.output_dir + '/' + fname[:fname.rfind('.') + 1] + props.output_format + '"'))
+			change_title('[{} / {}] {}, {}'.format(i, len(jobs), fname, ', ', props.finish))
 			subprocess.call(command)
 	else:
 		import multiprocessing
-		processes = [None] * threads
-		pipes = [None] * threads
+		processes = [None] * props.threads
+		pipes = [None] * props.threads
 		action_pipe = multiprocessing.Pipe()
-		for cnt in range(min(threads, len(jobs))):
+		for cnt in range(min(props.threads, len(jobs))):
 			print('Starting thread {}'.format(cnt))
 			pipes[cnt] = multiprocessing.Pipe()
 			processes[cnt] = multiprocessing.Process(target = process, args = (cnt, pipes[cnt][0], action_pipe[0]))
@@ -490,36 +515,36 @@ def main(argv):
 			what_to_do = action_pipe[1].recv()
 			if jobN == len(jobs):
 				break
-			for num in range(threads):
+			for num in range(props.threads):
 				if pipes[num][1].poll():
 					job = jobs[jobN]
 					pipes[num][1].recv()
 					if os.sys.platform == 'win32':
-						pipes[num][1].send('start "{}" /WAIT '.format(job) + ffmpeg_path + ' ' + input_params + \
-						                   os.path.normpath(' "' + input_dir + '/' + job + '" ') + output_params + \
-						                   os.path.normpath(' "' + output_dir + '/' + job[:job.rfind('.') + 1] + output_format + '"')
+						pipes[num][1].send('start "{}" /WAIT '.format(job) + props.ffmpeg_path + ' ' + props.input_params + \
+						                   os.path.normpath(' "' + props.input_dir + '/' + job + '" ') + props.output_params + \
+						                   os.path.normpath(' "' + props.output_dir + '/' + job[:job.rfind('.') + 1] + props.output_format + '"')
 						                  )
 					else:
-						pipes[num][1].send(ffmpeg_path + ' ' + input_params + os.path.normpath(' "' + input_dir + '/' + job + '" ') +\
-						                   output_params + os.path.normpath(' "' + output_dir + '/' + job[:job.rfind('.') + 1] + output_format + '"') + \
+						pipes[num][1].send(props.ffmpeg_path + ' ' + props.input_params + os.path.normpath(' "' + props.input_dir + '/' + job + '" ') +\
+						                   props.output_params + os.path.normpath(' "' + props.output_dir + '/' + job[:job.rfind('.') + 1] + props.output_format + '"') + \
 						                   ' &')
 					jobN += 1
 					if jobN == len(jobs):
 						break
 		closed_threads = 0
-		while closed_threads < threads:
+		while closed_threads < props.threads:
 			what_to_do = action_pipe[1].recv()
-			for num in range(threads):
+			for num in range(props.threads):
 				if pipes[num][1].poll():
 					pipes[num][1].recv()
 					pipes[num][1].send(None)
 					processes[num].join()
 					closed_threads += 1
-	if os.path.isdir(output_dir) and len(os.listdir(output_dir)) == 0:
+	if os.path.isdir(props.output_dir) and len(os.listdir(props.output_dir)) == 0:
 		print('Output folder is empty, it will be deleted')
-		os.rmdir(output_dir)
-	finish.execute()
-	if not no_user:
+		os.rmdir(props.output_dir)
+	props.finish.execute()
+	if not props.no_user:
 		pause()
 
 if __name__ == '__main__':
