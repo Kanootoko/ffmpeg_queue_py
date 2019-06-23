@@ -213,7 +213,11 @@ class properties:
 	@input_formats.setter
 	def input_formats(self, new_input_formats):
 		if isinstance(new_input_formats, str):
-			self._input_formats = ' '.join(new_input_formats.split(',')).split()
+			from re import match
+			if match('^\[(.*)*\]$', new_input_formats) is not None:
+				self._input_formats = list(map(lambda x: x[1:-1] if x.startswith("'") and x.endswith("'") else x, new_input_formats[1:-1].split(', ')))
+			else:
+				self._input_formats = ' '.join(new_input_formats.split(',')).split()
 		else:
 			self._input_formats = new_input_formats
 	@property
