@@ -1,5 +1,5 @@
 '''This is a console program which provides queue feature for ffmpeg. It can be used with other applications, if needed
-Version: 1.1.0 [2018.09.19]
+Version: 1.2.0 [2019.06.24]
 Usage:
 1. Console arguments.
 	"--help" - print this help message and terminate program
@@ -502,16 +502,18 @@ def main(argv):
 			           *split_quotes(props.output_params), os.path.normpath(props.output_dir + '/' + fname[:fname.rfind('.') + 1] + props.output_format))
 			print(props.ffmpeg_path, props.input_params, os.path.normpath('"' + props.input_dir + '/' + fname + '"'), \
 			      *split_quotes(props.output_params), os.path.normpath('"' + props.output_dir + '/' + fname[:fname.rfind('.') + 1] + props.output_format + '"'))
-			change_title('[{} / {}] {}, {}'.format(i, len(jobs), fname, ', ', props.finish))
+			change_title('[{} / {}] ({}), {}'.format(i, len(jobs), fname, props.finish))
 			subprocess.call(command)
 	else:
 		import multiprocessing
-		processes = [None] * props.threads
-		pipes = [None] * props.threads
+		if len(jobs) < props.threads:
+			print('Setting number of threads from {} to {} as number of jobs to encode'.format(props.threads, len(jobs)))
+			props.threads = len(jobs)
+		processes = [None for i in range(props.threads)]
+		pipes = [multiprocessing.Pipe() for i in range(props.threads)]
 		action_pipe = multiprocessing.Pipe()
 		for cnt in range(min(props.threads, len(jobs))):
 			print('Starting thread {}'.format(cnt))
-			pipes[cnt] = multiprocessing.Pipe()
 			processes[cnt] = multiprocessing.Process(target = process, args = (cnt, pipes[cnt][0], action_pipe[0]))
 			processes[cnt].start()
 		jobN = 0
