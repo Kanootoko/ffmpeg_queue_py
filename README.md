@@ -1,11 +1,13 @@
-﻿h1 ffmpeg_queue  
+﻿# ffmpeg_queue
+
 It's the script which helps you launch ffmpeg on list of files, given the same parameters. It's useful when you have many episodes of series downloaded for example, and you want to recode them all with the same parameters to reduce size or some other reason.  
-h3 Usage:  
+
+## Usage
 
 1. Console arguments.  
     * `--help` - print help message and terminate program  
     * `--ffmpeg_path=<path/to/ffmpeg>` or `-ffpath <path/to/ffmpeg>` - set path to ffmpeg executable  
-    * `--input_formats=<string>` or `-if <string>` or `-fin <string>` - set input format(s) for input pattern. For multiple formats you should use commas. `-if=mkv,avi,mp4`  
+    * `--input_formats=<string>` or `-if <string>` or `-fin <string>` - set input format(s) for input pattern. For multiple formats you should use commas. `-if mkv,avi,mp4`  
     * `--output_format=<string>` or `-of <string>` or `-fout <string>` - set output format for output pattern  
     * `--input_dir=<path/to/dir>` or `-id <path/to/dir>` or `-din <path/to/dir>` - set path to directory with input files  
     * `--output_dir=<path/to/dir>` or `-od <path/to/dir>` or `-dout <path/to/dir>` - set path to directory for output files (if it doesen't exists, but can be created, it will be)  
@@ -18,7 +20,7 @@ h3 Usage:
     * `--shutdown_time=<int>` or `-time <int>` - set time which passes from the end of the job to  shutdown/hibernation of the PC.  
     * `--no_user` or `-no_user` - no interface will be shown, only commands passed with command line or configuration file  
 2. Configuration ini file.  
-    Configuration can be loaded at startup point, by passing console parameter `config_file=<path>` or `-cfg <path>`, or it can be loaded from user interface by command `load`. You can save any configuration by command `save` at UI.  
+    Configuration can be loaded at startup point, by passing console parameter `--config_file=<path>` or `-cfg <path>`, or it can be loaded from user interface by command `load`. You can save any configuration by command `save` at UI.  
     Also, ini file is easily readable by any text-viewer, after save you can try to change by yourself.  
     In some cases, not all of the parameters go to ini file - it happens when they are same to default.  
 3. Interface.  
