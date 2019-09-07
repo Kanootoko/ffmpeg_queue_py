@@ -208,7 +208,7 @@ class Properties:
 			.replace(Properties.props_names[Properties.Prop.INPUT_FILENAME], filename) \
 			.replace(Properties.props_names[Properties.Prop.OUTPUT_PARAMS], self.output_params) \
 			.replace(Properties.props_names[Properties.Prop.OUTPUT_DIR], self.output_dir) \
-			.replace(Properties.props_names[Properties.Prop.OUTPUT_FILENAME], filename) \
+			.replace(Properties.props_names[Properties.Prop.OUTPUT_FILENAME], filename[:filename.rfind('.') + 1] + self.output_format) \
 			.replace(Properties.props_names[Properties.Prop.TIME], f'{self._time}')
 	@property
 	def threads(self):
@@ -604,7 +604,7 @@ def main_menu(props: Properties):
 					props.threads = int(data)
 					if props.threads > os.cpu_count():
 						print(f'Warning: number of threads that you\'ve entered is larger than ' \
-							'your computer\'s number of cpus: {os.cpu_count()}, but {props.threads} threads.')
+							f'your computer\'s number of cpus: {os.cpu_count()}, but {props.threads} threads.')
 					print('Accepted')
 					break
 				except Exception:
@@ -675,7 +675,7 @@ def main(argv):
 	for fname in os.listdir(props.input_dir):
 		if fname.endswith(tuple(props.input_formats)):
 			files.append(fname)
-	props.output_dir = Properties.get_exec_str(props, props.output_dir)
+	props.output_dir = Properties.get_exec_cmd(props, '', props.output_dir)
 	if len(files) > 0 and not os.path.exists(props.output_dir):
 		os.mkdir(props.output_dir)
 	files = tuple(files)
@@ -702,19 +702,16 @@ def main(argv):
 		if os.sys.platform == 'win32':
 			done = pool.map_async( \
 				recode_func, \
-				((i, f'start "{job}" /WAIT ' + props.ffmpeg_path + ' ' + props.input_params + \
-				' "' + props.input_dir + os.path.sep + job + '" ' + props.output_params + \
-				' "' + props.output_dir + os.path.sep + job[:job.rfind('.') + 1] + props.output_format + '"') \
-					for i, job in enumerate(files)
+				((i, f'start "{fname}" /WAIT ' + \
+					Properties.get_exec_cmd(props, fname))
+					for i, fname in enumerate(files)
 				)
 			)
 		else:
 			done = pool.map_async( \
 				recode_func, \
-				((i, props.ffmpeg_path + ' ' + props.input_params + \
-				os.path.normpath(' "' + props.input_dir + os.path.sep + job + '" ') + props.output_params + \
-				os.path.normpath(' "' + props.output_dir + os.path.sep + job[:job.rfind('.') + 1] + props.output_format + '"') + ' &')
-					for i, job in enumerate(files)
+				((i, Properties.get_exec_cmd(props, fname) + ' &')
+					for i, fname in enumerate(files)
 				)
 			)
 		try:
