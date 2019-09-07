@@ -690,7 +690,7 @@ def main(argv):
 			#print(props.ffmpeg_path, props.input_params, '"' + props.input_dir + os.path.sep + fname + '"',
 			#	*split_quotes(props.output_params),
 			#	'"' + props.output_dir + os.path.sep + fname[:fname.rfind('.') + 1] + props.output_format + '"')
-			change_title(f'[{i} / {len(files)}] ({fname}), {props.finish}')
+			change_title(f'[{i + 1} / {len(files)}] ({fname}), {props.finish}')
 			subprocess.call(command)
 	elif len(files) > 0:
 		import multiprocessing
@@ -702,7 +702,7 @@ def main(argv):
 		if os.sys.platform == 'win32':
 			done = pool.map_async( \
 				recode_func, \
-				((i, f'start "{fname}" /WAIT ' + \
+				((i + 1, f'start "{fname}" /WAIT ' + \
 					Properties.get_exec_cmd(props, fname))
 					for i, fname in enumerate(files)
 				)
@@ -710,7 +710,7 @@ def main(argv):
 		else:
 			done = pool.map_async( \
 				recode_func, \
-				((i, Properties.get_exec_cmd(props, fname) + ' &')
+				((i + 1, Properties.get_exec_cmd(props, fname) + ' &')
 					for i, fname in enumerate(files)
 				)
 			)
