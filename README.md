@@ -1,4 +1,4 @@
-﻿# ffmpeg_queue
+# ffmpeg_queue
 
 It's the script which helps you launch ffmpeg on list of files, given the same parameters. It's useful when you have many episodes of series downloaded for example, and you want to recode them all with the same parameters to reduce size or some other reason.  
 
